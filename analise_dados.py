@@ -107,3 +107,55 @@ else:
 # DBUtils não existe localmente, então removemos ou criamos um mock se necessário.
 # Para este script, substituímos o uso dele por 'os', então não precisamos emular agora.
 print("   Nota: Utilitário 'dbutils' foi substituído por funções nativas 'os' do Python.")
+
+
+# ==============================================================================
+# CÉLULA 2: Mapeamento de colunas e definição de Schema
+# ==============================================================================
+
+print("\n--- Executando Célula 2: Definição de Schemas ---")
+
+output_folder_name = "final"
+output_path_final = os.path.join(output_base_path, output_folder_name)
+
+# 1. Mapeamento: Traduz nomes de colunas bagunçados para um padrão único
+column_name_mapping = {
+    "ano": "ano",
+    "cpf do suprido": "cpf_suprido",
+    "cpf/cnpj favorecido": "cpf_cnpj_favorecido",
+    "cpf/cnpj do favorecido": "cpf_cnpj_favorecido",
+    "objeto da aquisição": "objeto_aquisicao",
+    "motivo": "objeto_aquisicao",  # Em 2016 usavam "motivo" em vez de objeto
+    " objeto da aquisição ": "objeto_aquisicao",
+    "objeto da aquisição ": "objeto_aquisicao",
+    "valor": "valor",
+    " valor ": "valor",
+    " valor": "valor",
+    "objeto da aquisicao": "objeto_aquisicao"
+}
+
+# 2. Schema: Define o tipo de dado de cada coluna (Texto, Inteiro, Decimal)
+schema_base = StructType([
+    StructField("ano", IntegerType(), True),
+    StructField("cpf_suprido", StringType(), True),
+    StructField("cpf_cnpj_favorecido", StringType(), True),
+    StructField("objeto_aquisicao", StringType(), True),
+    StructField("valor", DecimalType(12, 2), True)
+])
+
+# Lista das colunas finais que queremos manter
+desired_final_columns = [field.name for field in schema_base.fields]
+
+print(f"✅ Schema definido.")
+print(f"   Colunas alvo: {desired_final_columns}")
+
+# Verificação simples se a pasta de entrada tem conteúdo
+try:
+    if os.path.exists(input_base_path) and os.listdir(input_base_path):
+        print(f"   Verificação: Pasta de entrada encontrada e não vazia.")
+    else:
+        print(f"   ⚠️ AVISO: A pasta de entrada '{input_base_path}' parece vazia.")
+except Exception as e:
+    print(f"   ⚠️ AVISO: Erro ao verificar entrada: {e}")
+
+print("--- Fim da Célula 2 ---")
