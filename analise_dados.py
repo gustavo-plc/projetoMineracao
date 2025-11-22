@@ -29,16 +29,23 @@ print(f"Versão do Python: {sys.version.split()[0]}")
 print(f"Versão do Pandas: {pd.__version__}")
 print("Diagnóstico da Célula 1 concluído.\n---")
 
-# --- 2. Inicializando a Sessão Spark Manualmente ---
+# --- 2. Inicializando a Sessão Spark Manualmente (Versão Estável) ---
 print("--- Iniciando Sessão Spark ---")
 print("Nota: Na primeira execução, pode demorar para baixar o pacote do Excel...")
 
+# Definição da biblioteca de Excel correta para Spark 3.x
+# Versão antiga: "com.crealytics:spark-excel_2.12:0.14.0" (Causava erro)
+# Versão nova: "com.crealytics:spark-excel_2.12:3.5.0_0.20.3" (Estável)
+excel_maven_package = "com.crealytics:spark-excel_2.12:3.5.0_0.20.3"
+
 spark = SparkSession.builder \
     .appName("ProjetoMineracao_Mestrado") \
-    .config("spark.jars.packages", "com.crealytics:spark-excel_2.12:0.14.0") \
+    .config("spark.jars.packages", excel_maven_package) \
     .config("spark.sql.parquet.datetimeRebaseModeInWrite", "LEGACY") \
     .config("spark.sql.parquet.int96RebaseModeInWrite", "LEGACY") \
     .config("spark.sql.shuffle.partitions", "32") \
+    .config("spark.driver.bindAddress", "127.0.0.1") \
+    .config("spark.driver.host", "127.0.0.1") \
     .master("local[*]") \
     .getOrCreate()
 
