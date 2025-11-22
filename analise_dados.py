@@ -159,3 +159,86 @@ except Exception as e:
     print(f"   ⚠️ AVISO: Erro ao verificar entrada: {e}")
 
 print("--- Fim da Célula 2 ---")
+
+
+
+# ==============================================================================
+# CÉLULA 3: Funções de Limpeza e Padronização (UDFs)
+# ==============================================================================
+
+print("\n--- Executando Célula 3: Funções de Limpeza ---")
+
+# Garante que as bibliotecas necessárias para texto estejam importadas
+import unicodedata
+import re
+from pyspark.sql.types import StringType
+
+def standardize_text(text):
+    """
+    Limpa e padroniza texto:
+    - Remove acentos (ex: 'avô' -> 'avo')
+    - Remove caracteres especiais (mantém apenas letras, números e espaços)
+    - Converte para minúsculas
+    - Remove espaços duplicados
+    """
+    if text is None:
+        return None
+
+    text_str = str(text).strip()
+
+    if not text_str:
+        return None  # Evita processar string vazia
+
+    # Normalização Unicode (Separa o acento da letra e remove)
+    text_str = unicodedata.normalize('NFKD', text_str) \
+        .encode('ASCII', 'ignore') \
+        .decode('ASCII')
+
+    # Remove tudo que não é letra (a-z), número (0-9) ou espaço (\s)
+    text_str = re.sub(r'[^a-zA-Z0-9\s]', ' ', text_str).lower()
+
+    # Remove espaços extras (ex: "  texto   livre " -> "texto livre")
+    text_str = ' '.join(text_str.split())
+
+    return text_str if text_str else None
+
+def standardize_column_name(col_name):
+    """
+    Padroniza nomes de colunas para snake_case.
+    Ex: 'Valor (R$)' -> 'valor'
+    """
+    if not col_name:
+        return "col_desconhecida"
+        
+    col_name = str(col_name).lower()
+    
+    # Substituições de preposições comuns para encurtar o nome
+    for prep in [' do ', ' de ', ' da ', ' dos ', ' das ']:
+        col_name = col_name.replace(prep, '_')
+        
+    # Remove caracteres não alfanuméricos e substitui por underscore
+    col_name = re.sub(r'[^\w]+', '_', col_name)
+    
+    # Remove múltiplos underscores e underscores no início/fim
+    col_name = re.sub(r'_+', '_', col_name).strip('_')
+    
+    return col_name
+
+print("✅ Funções 'standardize_text' e 'standardize_column_name' definidas.")
+
+# Registrar UDF (User Defined Function) no Spark
+# Isso permite usar a função standardize_text dentro de comandos Spark SQL
+standardize_text_udf = spark.udf.register("standardize_text_udf", standardize_text, StringType())
+
+# Verificar se a UDF foi registrada corretamente
+registered_udfs = [f.name for f in spark.catalog.listFunctions() if f.name == 'standardize_text_udf']
+
+if "standardize_text_udf" in registered_udfs:
+    print("✅ UDF 'standardize_text_udf' registrada com sucesso no Spark.")
+else:
+    print("❌ Falha ao registrar a UDF 'standardize_text_udf'.")
+
+print("--- Fim da Célula 3 ---")
+
+
+
