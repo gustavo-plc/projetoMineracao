@@ -34,7 +34,7 @@ print("--- Iniciando Sessão Spark ---")
 print("Nota: Na primeira execução, pode demorar para baixar o pacote do Excel...")
 
 spark = SparkSession.builder \
-    .appName("AnaliseA3_Local") \
+    .appName("ProjetoMineracao_Mestrado") \
     .config("spark.jars.packages", "com.crealytics:spark-excel_2.12:0.14.0") \
     .config("spark.sql.parquet.datetimeRebaseModeInWrite", "LEGACY") \
     .config("spark.sql.parquet.int96RebaseModeInWrite", "LEGACY") \
