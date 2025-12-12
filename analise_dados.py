@@ -248,4 +248,141 @@ else:
 print("--- Fim da Célula 3 ---")
 
 
+# ==============================================================================
+# CÉLULA 4: Padronização de Nomes de Colunas (DataFrame)
+# ==============================================================================
 
+def standardize_dataframe_columns(df):
+    """
+    Aplica padronização nos nomes das colunas do DataFrame.
+    Resolve conflitos de nomes duplicados.
+    """
+    original_columns = df.columns
+    proposed_renames = {}
+
+    # Passo 1: Propor novos nomes
+    for orig_col_name in original_columns:
+        # Limpa o nome para facilitar o match
+        clean_name = str(orig_col_name).strip().lower()
+        clean_name = ''.join(c for c in unicodedata.normalize('NFKD', clean_name) if not unicodedata.combining(c))
+
+        target_name = None
+        
+        # Tenta achar no mapeamento oficial
+        if clean_name in column_name_mapping:
+            target_name = column_name_mapping[clean_name]
+        else:
+            # Se não achar, padroniza automaticamente
+            target_name = standardize_column_name(orig_col_name)
+            if not target_name:
+                target_name = f"col_fallback_{original_columns.index(orig_col_name)}"
+
+        proposed_renames[orig_col_name] = target_name
+
+    # Passo 2: Resolver colisões (nomes iguais)
+    final_renames_map = {}
+    name_counts = {}
+
+    for orig_col_name in original_columns:
+        target = proposed_renames[orig_col_name]
+        
+        # Se o nome já existe, adiciona um sufixo numérico (ex: valor_1)
+        count = name_counts.get(target, 0)
+        if count > 0:
+            resolved_name = f"{target}_{count}"
+        else:
+            resolved_name = target
+            
+        # Verifica se o nome resolvido também colide (raro, mas possível)
+        while resolved_name in final_renames_map.values():
+            count += 1
+            resolved_name = f"{target}_{count}"
+
+        name_counts[target] = count + 1
+        final_renames_map[orig_col_name] = resolved_name
+
+    # Passo 3: Aplicar renomeação no DataFrame
+    df_final = df
+    for orig, new in final_renames_map.items():
+        if orig != new:
+            df_final = df_final.withColumnRenamed(orig, new)
+
+    return df_final
+
+print("\n✅ Função 'standardize_dataframe_columns' definida.")
+
+
+# ==============================================================================
+# CÉLULA 5: Processamento de Dados (Limpeza de Valores e Texto)
+# ==============================================================================
+
+def process_dataframe(df):
+    """
+    Limpa e converte os dados das colunas principais.
+    """
+    df_processed = df
+
+    # 1. Limpeza de Texto (Objeto da Aquisição)
+    if "objeto_aquisicao" in df_processed.columns:
+        df_processed = df_processed.withColumn(
+            "objeto_aquisicao",
+            when(
+                col("objeto_aquisicao").isNotNull() & (trim(col("objeto_aquisicao")) != ""),
+                standardize_text_udf(col("objeto_aquisicao"))
+            ).otherwise(lit(None).cast(StringType()))
+        )
+
+    # 2. Limpeza de Valor (R$ 1.000,00 -> 1000.00)
+    if "valor" in df_processed.columns:
+        # Remove tudo que não é número (mantém apenas dígitos)
+        # Assume que o valor original no Excel pode vir como texto sujo
+        df_processed = df_processed.withColumn(
+            "valor_cleaned_str",
+            when(
+                col("valor").isNotNull(),
+                regexp_replace(col("valor").cast(StringType()), r"[^0-9]", "")
+            ).otherwise(lit(None))
+        )
+
+        # Converte para Decimal (divide por 100 para ajustar centavos, se vier sem vírgula)
+        # Nota: Essa lógica assume que "1000" virou "1000" (R$ 10,00).
+        # Se o excel lê direto como float, isso pode precisar de ajuste.
+        # Para garantir, vamos confiar na conversão direta se já for numérico, ou tratar se for string.
+        
+        df_processed = df_processed.withColumn(
+            "valor",
+            when(
+                col("valor_cleaned_str").isNotNull() & (col("valor_cleaned_str") != ""),
+                (col("valor_cleaned_str").cast(DecimalType(20, 0)) / 100.0).cast(DecimalType(12, 2))
+            ).otherwise(lit(None).cast(DecimalType(12, 2)))
+        ).drop("valor_cleaned_str")
+
+    # 3. Conversão de Ano
+    if "ano" in df_processed.columns:
+        df_processed = df_processed.withColumn("ano", col("ano").cast(IntegerType()))
+
+    # 4. Limpeza de CPF/CNPJ (Apenas números)
+    for doc_col in ["cpf_suprido", "cpf_cnpj_favorecido"]:
+        if doc_col in df_processed.columns:
+            df_processed = df_processed.withColumn(
+                doc_col,
+                when(
+                    col(doc_col).isNotNull(),
+                    regexp_replace(col(doc_col).cast(StringType()), r"[^0-9]", "")
+                ).otherwise(lit(None).cast(StringType()))
+            )
+
+    # 5. Seleção Final (Apenas colunas do Schema)
+    final_cols = []
+    for field in schema_base.fields:
+        colname = field.name
+        if colname in df_processed.columns:
+            final_cols.append(col(colname).cast(field.dataType).alias(colname))
+        else:
+            # Se a coluna faltar, cria como NULL
+            final_cols.append(lit(None).cast(field.dataType).alias(colname))
+
+    return df_processed.select(final_cols)
+
+print("✅ Função 'process_dataframe' definida.")
+print("--- Fim das Células 4 e 5 ---")
