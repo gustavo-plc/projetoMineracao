@@ -1,7 +1,4 @@
-import os
-
-# Conteúdo da documentação atualizada (Fase 1 Completa)
-conteudo_docs = """# 📄 Documentação Técnica: Pipeline de ETL Local (PySpark) - Fase 1 Completa
+# 📄 Documentação Técnica: Pipeline de ETL Local (PySpark) - Fase 1 Completa
 
 **Projeto:** Mineração de Dados de Gastos Públicos (Cartão Corporativo)
 **Ambiente:** Local (Windows 11 / VS Code)
@@ -15,8 +12,8 @@ Para viabilizar a execução do Spark no Windows sem erros de *NativeIO* ou *Had
 ### 1. Binários do Hadoop (Winutils)
 O Spark requer emulação do sistema de arquivos HDFS.
 * **Versão Hadoop:** 3.3.5 (Compatível com Spark 3.5.3).
-* **Variável de Ambiente:** `HADOOP_HOME` configurada para `C:\\hadoop`.
-* **Path:** `%HADOOP_HOME%\\bin` adicionado ao Path do sistema.
+* **Variável de Ambiente:** `HADOOP_HOME` configurada para `C:\hadoop`.
+* **Path:** `%HADOOP_HOME%\bin` adicionado ao Path do sistema.
 
 ### 2. Correção de DLL (UnsatisfiedLinkError)
 Para corrigir o erro `java.lang.UnsatisfiedLinkError: org.apache.hadoop.io.nativeio.NativeIO$Windows.access0`, foi necessário instalar manualmente a biblioteca dinâmica do Hadoop.
@@ -24,8 +21,8 @@ Para corrigir o erro `java.lang.UnsatisfiedLinkError: org.apache.hadoop.io.nativ
 * **Arquivo:** `hadoop.dll`
 * **Origem (Download):** [https://github.com/cdarlint/winutils/blob/master/hadoop-3.3.5/bin/hadoop.dll](https://github.com/cdarlint/winutils/blob/master/hadoop-3.3.5/bin/hadoop.dll)
 * **Instalação:** O arquivo foi copiado para:
-    1.  `C:\\hadoop\\bin`
-    2.  `C:\\Windows\\System32` (Essencial para o carregamento global pelo Java).
+    1.  `C:\hadoop\bin`
+    2.  `C:\Windows\System32` (Essencial para o carregamento global pelo Java).
 
 ### 3. Bibliotecas Python Adicionais
 Além do PySpark, foram instaladas dependências para manipulação de arquivos legados:
@@ -72,18 +69,6 @@ Esta célula orquestra a leitura e gravação dos dados massivos.
 
 ## 📂 Estrutura de Saída
 Os dados limpos encontram-se em:
-`C:\\VSCode\\projetoMineracao\\dados\\Parquet\\{ANO}\\{NOME_ARQUIVO}`
+`C:\VSCode\projetoMineracao\dados\Parquet\{ANO}\{NOME_ARQUIVO}`
 
 Cada pasta contém os arquivos `.parquet` prontos para a etapa de consolidação e análise (Machine Learning).
-"""
-
-nome_arquivo = "documentacao_tecnica_fase1_completa.md"
-caminho_completo = os.path.join(os.getcwd(), nome_arquivo)
-
-try:
-    with open(caminho_completo, "w", encoding="utf-8") as f:
-        f.write(conteudo_docs)
-    print(f"✅ Arquivo de documentação '{nome_arquivo}' gerado com sucesso!")
-    print(f"📂 Local: {caminho_completo}")
-except Exception as e:
-    print(f"❌ Erro ao gerar arquivo: {e}")
