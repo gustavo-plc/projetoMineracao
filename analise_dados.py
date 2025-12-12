@@ -172,37 +172,41 @@ print("--- Fim da Célula 2 ---")
 
 
 # ==============================================================================
-# CÉLULAS 3, 4 e 5 (CONSOLIDADAS): Processamento Otimizado (Native Spark)
+# CÉLULAS 3, 4 e 5 (CORRIGIDAS E FINALIZADAS): Processamento Nativo Seguro
 # ==============================================================================
 
 print("\n--- Executando Processamento Otimizado (Native Spark) ---")
 
-# Importação necessária para a manipulação de strings no driver (nomes de colunas)
 import re
 
 def clean_column_names(df):
     """
-    Renomeia todas as colunas de uma vez só usando Select + Alias.
+    Renomeia colunas removendo acentos e padronizando (Python-side).
+    Garante que nomes de colunas como 'Descrição' virem 'descricao'.
     """
     new_columns = []
     existing_names = set()
     
+    # Mapeamento completo de acentos para nomes de colunas
+    accents_src = 'áàâãäéèêëíìîïóòôõöúùûüçñ'
+    accents_tgt = 'aaaaaeeeeiiiiooooouuuucn'
+    
     for col_name in df.columns:
-        # 1. Limpeza básica da string do nome
         clean = col_name.strip().lower()
-        # Remove acentos de forma simples no nome da coluna
-        for a, b in zip('áéíóúâêôãõç', 'aeiouaeoaoc'):
-            clean = clean.replace(a, b)
         
-        # 2. Verifica mapeamento oficial (definido na Célula 2)
+        # Remove acentos do nome da coluna
+        for src, tgt in zip(accents_src, accents_tgt):
+            clean = clean.replace(src, tgt)
+        
+        # Verifica mapeamento oficial (definido na Célula 2)
         final_name = column_name_mapping.get(clean)
         
-        # 3. Se não achar, padroniza (snake_case simplificado)
         if not final_name:
+            # Remove qualquer coisa que não seja letra ou número (snake_case)
             final_name = re.sub(r'[^a-z0-9]+', '_', clean).strip('_')
             if not final_name: final_name = f"col_{df.columns.index(col_name)}"
         
-        # 4. Resolve colisões (sufixo _1, _2)
+        # Resolve conflitos de nomes iguais
         base_name = final_name
         count = 1
         while final_name in existing_names:
@@ -210,30 +214,41 @@ def clean_column_names(df):
             count += 1
             
         existing_names.add(final_name)
-        
-        # Adiciona à lista de seleção
         new_columns.append(col(f"`{col_name}`").alias(final_name))
     
     return df.select(*new_columns)
 
 def process_dataframe(df):
     """
-    Aplica transformações usando APENAS funções nativas do Spark.
+    Aplica limpeza nos dados usando funções nativas do Spark.
+    CORREÇÃO FINAL: Garante substituição de todos os acentos antes da limpeza de símbolos.
     """
-    # 1. Padroniza nomes das colunas primeiro
+    # 1. Padroniza nomes das colunas
     df = clean_column_names(df)
     
-    # 2. Definição das Expressões de Limpeza (Lazy Evaluation)
+    # 2. Definição da limpeza de Texto (Objeto da Aquisição)
     
-    # Texto: Remove símbolos e espaços extras
-    txt_clean_expr = F.trim(F.regexp_replace(F.lower(F.col("objeto_aquisicao")), r"[^a-z0-9\s]", ""))
+    # Lista completa de caracteres acentuados do Português
+    # O Spark vai procurar qualquer caractere da primeira string e trocar pelo correspondente na segunda.
+    src_chars = "áàâãäéèêëíìîïóòôõöúùûüçñÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇÑ"
+    tgt_chars = "aaaaaeeeeiiiiooooouuuucnAAAAAEEEEIIIIOOOOOUUUUCN"
     
-    # Valor: Remove tudo que não é dígito, converte e divide por 100
+    # Passo A: Converte para minúsculo
+    txt_lower = F.lower(F.col("objeto_aquisicao"))
+    
+    # Passo B: Troca acentos por letras normais (ç->c, ã->a, é->e...)
+    txt_translated = F.translate(txt_lower, src_chars, tgt_chars)
+    
+    # Passo C: Remove caracteres que não são letras(a-z), números(0-9) ou espaço
+    # Isso elimina traços, pontos, parênteses, etc.
+    txt_clean_expr = F.trim(F.regexp_replace(txt_translated, r"[^a-z0-9\s]", ""))
+    
+    # Limpeza de Valor (R$ 1.000,00 -> 1000.00)
     val_clean_expr = (
         F.regexp_replace(F.col("valor").cast("string"), r"[^0-9]", "").cast(DecimalType(20,0)) / 100.0
     ).cast(DecimalType(12,2))
 
-    # CPF/CNPJ: Remove pontuação
+    # Limpeza de CPF/CNPJ (Remove pontuação)
     doc_clean_expr = lambda c: F.regexp_replace(F.col(c).cast("string"), r"[^0-9]", "")
 
     # 3. Montagem do Select Final
@@ -266,7 +281,8 @@ def process_dataframe(df):
 
     return df.select(*final_cols)
 
-print("✅ Funções otimizadas definidas.")
+print("✅ Funções otimizadas (Correção total de acentuação: ã, ç, é -> a, c, e) definidas.")
+print("--- Fim das Células 4 e 5 ---")
 
 # ==============================================================================
 # CÉLULA 6 (CORRIGIDA): Leitura Inteligente de Abas + Conversão
@@ -358,3 +374,81 @@ if erros:
             f.write(f"{arq}: {msg}\n")
     print("Detalhes salvos em 'erros_conversao.log'")
 print("="*40)
+
+
+# ==============================================================================
+# CÉLULA 7 (FINAL BLINDADA): Consolidação com Schema Explícito
+# ==============================================================================
+
+print("\n--- Executando Célula 7: Consolidação dos Dados ---")
+
+import glob
+
+try:
+    # 1. Encontrar todas as subpastas de dados (Ano -> Arquivo)
+    # Padrão: dados/Parquet/20*/despesas_*
+    padrao_busca = os.path.join(output_base_path, "20*", "*")
+    candidatos = glob.glob(padrao_busca)
+    
+    # 2. Filtrar apenas pastas que contêm arquivos .parquet válidos
+    pastas_validas = []
+    print("Verificando integridade das pastas...")
+    
+    for pasta in candidatos:
+        # Verifica se tem algum arquivo terminando em .parquet dentro
+        tem_parquet = any(f.endswith('.parquet') for f in os.listdir(pasta))
+        if tem_parquet:
+            pastas_validas.append(pasta)
+    
+    if not pastas_validas:
+        raise Exception(f"Nenhuma pasta válida com arquivos Parquet encontrada em: {output_base_path}")
+        
+    print(f"Pastas válidas encontradas: {len(pastas_validas)}")
+    
+    # 3. Leitura com Schema FORÇADO
+    # Ao passar 'schema=schema_base', o Spark não tenta adivinhar nada, ele apenas lê.
+    # Isso resolve o erro UNABLE_TO_INFER_SCHEMA e é muito mais rápido.
+    df_consolidado = spark.read \
+        .schema(schema_base) \
+        .option("mergeSchema", "false") \
+        .parquet(*pastas_validas)
+    
+    total_registros = df_consolidado.count()
+    print(f"✅ Leitura concluída. Total de registros: {total_registros}")
+
+    # 4. Filtragem de Qualidade
+    print("Aplicando filtros de qualidade...")
+    
+    df_filtered = df_consolidado.filter(
+        F.col("valor").isNotNull() & 
+        (F.col("valor") > 0) & 
+        F.col("objeto_aquisicao").isNotNull() & 
+        (F.trim(F.col("objeto_aquisicao")) != "")
+    )
+    
+    total_filtrado = df_filtered.count()
+    print(f"Registros válidos: {total_filtrado}")
+    print(f"Descartados: {total_registros - total_filtrado}")
+
+    # 5. Salvamento Final
+    path_consolidado = os.path.join(BASE_DIR, "Consolidado")
+    print(f"Salvando consolidado em: {path_consolidado}")
+    
+    # Removemos .coalesce(1) se o arquivo for muito grande, mas para 100k linhas é seguro
+    df_filtered.coalesce(1).write \
+        .mode("overwrite") \
+        .option("compression", "snappy") \
+        .parquet(path_consolidado)
+        
+    print("✅ Consolidação concluída com sucesso!")
+    
+    # 6. Amostra
+    print("\n--- Amostra dos Dados Finais ---")
+    df_filtered.select("ano", "valor", "objeto_aquisicao").show(5, truncate=80)
+
+except Exception as e:
+    print(f"❌ Erro na consolidação: {e}")
+    import traceback
+    traceback.print_exc()
+
+print("--- Fim da Célula 7 ---")
