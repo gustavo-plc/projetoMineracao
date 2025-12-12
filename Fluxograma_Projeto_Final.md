@@ -1,7 +1,10 @@
-import os
+# Fluxograma de Engenharia de Dados: Mineração de Gastos Públicos
 
-# Definição do diagrama Mermaid (Visual e Estrutura Mantidos)
-mermaid_code = """```mermaid
+Este documento detalha a arquitetura do pipeline de ETL desenvolvido para processar e consolidar as despesas do Cartão Corporativo Federal (2016-2021).
+
+## Arquitetura do Processo
+
+```mermaid
 graph LR
     %% --- ESTILOS VISUAIS (Bordas 4px) ---
     classDef process fill:#e1f5fe,stroke:#01579b,stroke-width:4px,rx:10,ry:10,color:#000;
@@ -48,16 +51,7 @@ graph LR
 
     %% --- CONEXÕES DETALHADAS ---
     linkStyle 0,1,2,3,4,5,6,7 stroke:#333,stroke-width:1px;
-```"""
-
-# Conteúdo com Título Personalizado do Projeto
-conteudo_final = f"""# Fluxograma de Engenharia de Dados: Mineração de Gastos Públicos
-
-Este documento detalha a arquitetura do pipeline de ETL desenvolvido para processar e consolidar as despesas do Cartão Corporativo Federal (2016-2021).
-
-## Arquitetura do Processo
-
-{mermaid_code}
+```
 
 ---
 **Legenda:**
@@ -65,16 +59,3 @@ Este documento detalha a arquitetura do pipeline de ETL desenvolvido para proces
 * 🔵 **Azul:** Processamento de Dados.
 * 🟠 **Laranja:** Armazenamento (Data Lake).
 * 🔴 **Tracejado:** Próximos Passos (Inteligência Artificial).
-"""
-
-nome_arquivo = "Fluxograma_Projeto_Final.md"
-caminho_completo = os.path.join(os.getcwd(), nome_arquivo)
-
-try:
-    with open(caminho_completo, "w", encoding="utf-8") as f:
-        f.write(conteudo_final)
-    print(f"✅ Arquivo '{nome_arquivo}' gerado com sucesso!")
-    print(f"📂 Local: {caminho_completo}")
-    print("💡 Abra no VS Code e pressione 'Ctrl + Shift + V'.")
-except Exception as e:
-    print(f"❌ Erro ao gerar arquivo: {e}")
