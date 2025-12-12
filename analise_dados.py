@@ -170,219 +170,98 @@ print("--- Fim da Célula 2 ---")
 
 
 # ==============================================================================
-# CÉLULA 3: Funções de Limpeza e Padronização (UDFs)
+# CÉLULAS 3, 4 e 5 (CONSOLIDADAS): Processamento Otimizado (Native Spark)
 # ==============================================================================
 
-print("\n--- Executando Célula 3: Funções de Limpeza ---")
+print("\n--- Executando Processamento Otimizado (Native Spark) ---")
 
-# Garante que as bibliotecas necessárias para texto estejam importadas
-import unicodedata
+# Importação necessária para a manipulação de strings no driver (nomes de colunas)
 import re
-from pyspark.sql.types import StringType
 
-def standardize_text(text):
+def clean_column_names(df):
     """
-    Limpa e padroniza texto:
-    - Remove acentos (ex: 'avô' -> 'avo')
-    - Remove caracteres especiais (mantém apenas letras, números e espaços)
-    - Converte para minúsculas
-    - Remove espaços duplicados
+    Renomeia todas as colunas de uma vez só usando Select + Alias.
     """
-    if text is None:
-        return None
-
-    text_str = str(text).strip()
-
-    if not text_str:
-        return None  # Evita processar string vazia
-
-    # Normalização Unicode (Separa o acento da letra e remove)
-    text_str = unicodedata.normalize('NFKD', text_str) \
-        .encode('ASCII', 'ignore') \
-        .decode('ASCII')
-
-    # Remove tudo que não é letra (a-z), número (0-9) ou espaço (\s)
-    text_str = re.sub(r'[^a-zA-Z0-9\s]', ' ', text_str).lower()
-
-    # Remove espaços extras (ex: "  texto   livre " -> "texto livre")
-    text_str = ' '.join(text_str.split())
-
-    return text_str if text_str else None
-
-def standardize_column_name(col_name):
-    """
-    Padroniza nomes de colunas para snake_case.
-    Ex: 'Valor (R$)' -> 'valor'
-    """
-    if not col_name:
-        return "col_desconhecida"
-        
-    col_name = str(col_name).lower()
+    new_columns = []
+    existing_names = set()
     
-    # Substituições de preposições comuns para encurtar o nome
-    for prep in [' do ', ' de ', ' da ', ' dos ', ' das ']:
-        col_name = col_name.replace(prep, '_')
+    for col_name in df.columns:
+        # 1. Limpeza básica da string do nome
+        clean = col_name.strip().lower()
+        # Remove acentos de forma simples no nome da coluna
+        for a, b in zip('áéíóúâêôãõç', 'aeiouaeoaoc'):
+            clean = clean.replace(a, b)
         
-    # Remove caracteres não alfanuméricos e substitui por underscore
-    col_name = re.sub(r'[^\w]+', '_', col_name)
-    
-    # Remove múltiplos underscores e underscores no início/fim
-    col_name = re.sub(r'_+', '_', col_name).strip('_')
-    
-    return col_name
-
-print("✅ Funções 'standardize_text' e 'standardize_column_name' definidas.")
-
-# Registrar UDF (User Defined Function) no Spark
-# Isso permite usar a função standardize_text dentro de comandos Spark SQL
-standardize_text_udf = spark.udf.register("standardize_text_udf", standardize_text, StringType())
-
-# Verificar se a UDF foi registrada corretamente
-registered_udfs = [f.name for f in spark.catalog.listFunctions() if f.name == 'standardize_text_udf']
-
-if "standardize_text_udf" in registered_udfs:
-    print("✅ UDF 'standardize_text_udf' registrada com sucesso no Spark.")
-else:
-    print("❌ Falha ao registrar a UDF 'standardize_text_udf'.")
-
-print("--- Fim da Célula 3 ---")
-
-
-# ==============================================================================
-# CÉLULA 4: Padronização de Nomes de Colunas (DataFrame)
-# ==============================================================================
-
-def standardize_dataframe_columns(df):
-    """
-    Aplica padronização nos nomes das colunas do DataFrame.
-    Resolve conflitos de nomes duplicados.
-    """
-    original_columns = df.columns
-    proposed_renames = {}
-
-    # Passo 1: Propor novos nomes
-    for orig_col_name in original_columns:
-        # Limpa o nome para facilitar o match
-        clean_name = str(orig_col_name).strip().lower()
-        clean_name = ''.join(c for c in unicodedata.normalize('NFKD', clean_name) if not unicodedata.combining(c))
-
-        target_name = None
+        # 2. Verifica mapeamento oficial (definido na Célula 2)
+        final_name = column_name_mapping.get(clean)
         
-        # Tenta achar no mapeamento oficial
-        if clean_name in column_name_mapping:
-            target_name = column_name_mapping[clean_name]
-        else:
-            # Se não achar, padroniza automaticamente
-            target_name = standardize_column_name(orig_col_name)
-            if not target_name:
-                target_name = f"col_fallback_{original_columns.index(orig_col_name)}"
-
-        proposed_renames[orig_col_name] = target_name
-
-    # Passo 2: Resolver colisões (nomes iguais)
-    final_renames_map = {}
-    name_counts = {}
-
-    for orig_col_name in original_columns:
-        target = proposed_renames[orig_col_name]
+        # 3. Se não achar, padroniza (snake_case simplificado)
+        if not final_name:
+            final_name = re.sub(r'[^a-z0-9]+', '_', clean).strip('_')
+            if not final_name: final_name = f"col_{df.columns.index(col_name)}"
         
-        # Se o nome já existe, adiciona um sufixo numérico (ex: valor_1)
-        count = name_counts.get(target, 0)
-        if count > 0:
-            resolved_name = f"{target}_{count}"
-        else:
-            resolved_name = target
-            
-        # Verifica se o nome resolvido também colide (raro, mas possível)
-        while resolved_name in final_renames_map.values():
+        # 4. Resolve colisões (sufixo _1, _2)
+        base_name = final_name
+        count = 1
+        while final_name in existing_names:
+            final_name = f"{base_name}_{count}"
             count += 1
-            resolved_name = f"{target}_{count}"
-
-        name_counts[target] = count + 1
-        final_renames_map[orig_col_name] = resolved_name
-
-    # Passo 3: Aplicar renomeação no DataFrame
-    df_final = df
-    for orig, new in final_renames_map.items():
-        if orig != new:
-            df_final = df_final.withColumnRenamed(orig, new)
-
-    return df_final
-
-print("\n✅ Função 'standardize_dataframe_columns' definida.")
-
-
-# ==============================================================================
-# CÉLULA 5: Processamento de Dados (Limpeza de Valores e Texto)
-# ==============================================================================
+            
+        existing_names.add(final_name)
+        
+        # Adiciona à lista de seleção
+        new_columns.append(col(f"`{col_name}`").alias(final_name))
+    
+    return df.select(*new_columns)
 
 def process_dataframe(df):
     """
-    Limpa e converte os dados das colunas principais.
+    Aplica transformações usando APENAS funções nativas do Spark.
     """
-    df_processed = df
+    # 1. Padroniza nomes das colunas primeiro
+    df = clean_column_names(df)
+    
+    # 2. Definição das Expressões de Limpeza (Lazy Evaluation)
+    
+    # Texto: Remove símbolos e espaços extras
+    txt_clean_expr = F.trim(F.regexp_replace(F.lower(F.col("objeto_aquisicao")), r"[^a-z0-9\s]", ""))
+    
+    # Valor: Remove tudo que não é dígito, converte e divide por 100
+    val_clean_expr = (
+        F.regexp_replace(F.col("valor").cast("string"), r"[^0-9]", "").cast(DecimalType(20,0)) / 100.0
+    ).cast(DecimalType(12,2))
 
-    # 1. Limpeza de Texto (Objeto da Aquisição)
-    if "objeto_aquisicao" in df_processed.columns:
-        df_processed = df_processed.withColumn(
-            "objeto_aquisicao",
-            when(
-                col("objeto_aquisicao").isNotNull() & (trim(col("objeto_aquisicao")) != ""),
-                standardize_text_udf(col("objeto_aquisicao"))
-            ).otherwise(lit(None).cast(StringType()))
-        )
+    # CPF/CNPJ: Remove pontuação
+    doc_clean_expr = lambda c: F.regexp_replace(F.col(c).cast("string"), r"[^0-9]", "")
 
-    # 2. Limpeza de Valor (R$ 1.000,00 -> 1000.00)
-    if "valor" in df_processed.columns:
-        # Remove tudo que não é número (mantém apenas dígitos)
-        # Assume que o valor original no Excel pode vir como texto sujo
-        df_processed = df_processed.withColumn(
-            "valor_cleaned_str",
-            when(
-                col("valor").isNotNull(),
-                regexp_replace(col("valor").cast(StringType()), r"[^0-9]", "")
-            ).otherwise(lit(None))
-        )
-
-        # Converte para Decimal (divide por 100 para ajustar centavos, se vier sem vírgula)
-        # Nota: Essa lógica assume que "1000" virou "1000" (R$ 10,00).
-        # Se o excel lê direto como float, isso pode precisar de ajuste.
-        # Para garantir, vamos confiar na conversão direta se já for numérico, ou tratar se for string.
-        
-        df_processed = df_processed.withColumn(
-            "valor",
-            when(
-                col("valor_cleaned_str").isNotNull() & (col("valor_cleaned_str") != ""),
-                (col("valor_cleaned_str").cast(DecimalType(20, 0)) / 100.0).cast(DecimalType(12, 2))
-            ).otherwise(lit(None).cast(DecimalType(12, 2)))
-        ).drop("valor_cleaned_str")
-
-    # 3. Conversão de Ano
-    if "ano" in df_processed.columns:
-        df_processed = df_processed.withColumn("ano", col("ano").cast(IntegerType()))
-
-    # 4. Limpeza de CPF/CNPJ (Apenas números)
-    for doc_col in ["cpf_suprido", "cpf_cnpj_favorecido"]:
-        if doc_col in df_processed.columns:
-            df_processed = df_processed.withColumn(
-                doc_col,
-                when(
-                    col(doc_col).isNotNull(),
-                    regexp_replace(col(doc_col).cast(StringType()), r"[^0-9]", "")
-                ).otherwise(lit(None).cast(StringType()))
-            )
-
-    # 5. Seleção Final (Apenas colunas do Schema)
+    # 3. Montagem do Select Final
     final_cols = []
-    for field in schema_base.fields:
-        colname = field.name
-        if colname in df_processed.columns:
-            final_cols.append(col(colname).cast(field.dataType).alias(colname))
+    
+    # Ano
+    if "ano" in df.columns:
+        final_cols.append(F.col("ano").cast(IntegerType()).alias("ano"))
+    else:
+        final_cols.append(F.lit(None).cast(IntegerType()).alias("ano"))
+
+    # CPFs
+    for c in ["cpf_suprido", "cpf_cnpj_favorecido"]:
+        if c in df.columns:
+            final_cols.append(doc_clean_expr(c).alias(c))
         else:
-            # Se a coluna faltar, cria como NULL
-            final_cols.append(lit(None).cast(field.dataType).alias(colname))
+            final_cols.append(F.lit(None).cast(StringType()).alias(c))
 
-    return df_processed.select(final_cols)
+    # Objeto
+    if "objeto_aquisicao" in df.columns:
+        final_cols.append(txt_clean_expr.alias("objeto_aquisicao"))
+    else:
+        final_cols.append(F.lit(None).cast(StringType()).alias("objeto_aquisicao"))
 
-print("✅ Função 'process_dataframe' definida.")
-print("--- Fim das Células 4 e 5 ---")
+    # Valor
+    if "valor" in df.columns:
+        final_cols.append(val_clean_expr.alias("valor"))
+    else:
+        final_cols.append(F.lit(None).cast(DecimalType(12,2)).alias("valor"))
+
+    return df.select(*final_cols)
+
+print("✅ Funções otimizadas definidas.")

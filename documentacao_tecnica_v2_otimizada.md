@@ -1,7 +1,4 @@
-import os
-
-# Conteúdo da documentação atualizada (Versão Otimizada)
-conteudo_docs = """# 📄 Documentação Técnica: Pipeline de ETL Local (PySpark) - Versão Otimizada
+# 📄 Documentação Técnica: Pipeline de ETL Local (PySpark) - Versão Otimizada
 
 **Projeto:** Mineração de Dados de Gastos Públicos (Cartão Corporativo)
 **Ambiente:** Local (Windows 11 / VS Code)
@@ -68,15 +65,3 @@ Utiliza expressões *Lazy Evaluation* do Spark SQL (`pyspark.sql.functions`):
 | **Spark 3.5.3 (Downgrade)** | **Estabilidade:** A versão 4.0.1 apresentou instabilidade no Windows (erros de Netty/BlockManager). A versão 3.5.3 é estável e compatível com `winutils`. |
 | **Conversão ODS -> XLSX** | **Compatibilidade:** O Spark não possui leitura nativa robusta para OpenDocument (`.ods`). A conversão prévia via Pandas garante a integridade da ingestão. |
 
-"""
-
-nome_arquivo = "documentacao_tecnica_v2_otimizada.md"
-caminho_completo = os.path.join(os.getcwd(), nome_arquivo)
-
-try:
-    with open(caminho_completo, "w", encoding="utf-8") as f:
-        f.write(conteudo_docs)
-    print(f"✅ Arquivo de documentação atualizado gerado com sucesso!")
-    print(f"📂 Local: {caminho_completo}")
-except Exception as e:
-    print(f"❌ Erro ao gerar arquivo: {e}")
