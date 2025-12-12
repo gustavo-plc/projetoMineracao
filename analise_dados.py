@@ -38,12 +38,14 @@ print("Nota: Na primeira execução, pode demorar para baixar o pacote do Excel.
 # Versão nova: "com.crealytics:spark-excel_2.12:3.5.0_0.20.3" (Estável)
 excel_maven_package = "com.crealytics:spark-excel_2.12:3.5.0_0.20.3"
 
+# --- Célula 1: Ajuste de Memória e Paralelismo ---
 spark = SparkSession.builder \
-    .appName("ProjetoMineracao_Mestrado") \
+    .appName("AnaliseA3_Local") \
     .config("spark.jars.packages", excel_maven_package) \
     .config("spark.sql.parquet.datetimeRebaseModeInWrite", "LEGACY") \
     .config("spark.sql.parquet.int96RebaseModeInWrite", "LEGACY") \
-    .config("spark.sql.shuffle.partitions", "32") \
+    .config("spark.sql.shuffle.partitions", "8") \
+    .config("spark.driver.memory", "4g") \
     .config("spark.driver.bindAddress", "127.0.0.1") \
     .config("spark.driver.host", "127.0.0.1") \
     .master("local[*]") \
@@ -267,19 +269,19 @@ def process_dataframe(df):
 print("✅ Funções otimizadas definidas.")
 
 # ==============================================================================
-# CÉLULA 6: Leitura de Excel e Conversão para Parquet (Execução)
+# CÉLULA 6 (CORRIGIDA): Leitura Inteligente de Abas + Conversão
 # ==============================================================================
 
 print("\n--- Executando Célula 6: Conversão XLS -> Parquet ---")
 
-# Estatísticas de execução
+# Importação necessária para ler nomes de abas
+import pandas as pd
+
 total_arquivos = 0
 sucessos = 0
 erros = {}
 
-# Garante que a lista de anos existe (caso tenha pulado células anteriores)
 if 'anos_a_processar' not in locals():
-    # Define o range de 2016 até 2025 (o range exclui o último número)
     anos_a_processar = [str(ano) for ano in range(2016, 2026)]
 
 print(f"Processando período: {min(anos_a_processar)} a {max(anos_a_processar)}")
@@ -288,27 +290,22 @@ for ano in sorted(anos_a_processar):
     caminho_origem_ano = os.path.join(input_base_path, ano)
     caminho_destino_ano = os.path.join(output_base_path, ano)
     
-    print(f"\n📂 Verificando ano: {ano}")
+    print(f"\n📂 Processando ano: {ano}")
     
-    # Pula anos que não existem na pasta de input
     if not os.path.exists(caminho_origem_ano):
         print(f"   ⚠️ Pasta não encontrada: {caminho_origem_ano}")
         continue
         
-    # Lista apenas arquivos Excel (ignora temporários do sistema '~$')
     arquivos_ano = [
         f for f in os.listdir(caminho_origem_ano) 
         if f.lower().endswith(('.xlsx', '.xls')) and not f.startswith('~$')
     ]
     
     if not arquivos_ano:
-        print(f"   ℹ️ Nenhum arquivo Excel válido encontrado.")
+        print(f"   ℹ️ Nenhum arquivo Excel na pasta {ano}.")
         continue
         
-    # Cria a pasta de destino (Parquet)
     os.makedirs(caminho_destino_ano, exist_ok=True)
-    
-    print(f"   Encontrados {len(arquivos_ano)} arquivos. Iniciando conversão...")
     
     for arquivo in arquivos_ano:
         total_arquivos += 1
@@ -319,58 +316,45 @@ for ano in sorted(anos_a_processar):
         print(f"   🔄 {arquivo} ... ", end="")
         
         try:
-            # 1. Leitura do Excel
-            # Tenta ler a aba 'Planilha1' (padrão do Excel) começando da célula A1
+            # ESTRATÉGIA NOVA: Descobrir o nome da aba com Pandas (rápido e seguro)
+            # O Pandas lê apenas os metadados, não o arquivo todo, então é rápido.
+            xl = pd.ExcelFile(path_origem)
+            nome_primeira_aba = xl.sheet_names[0]
+            
+            # Agora mandamos o Spark ler exatamente essa aba
             df_raw = spark.read.format("com.crealytics.spark.excel") \
                 .option("header", "true") \
                 .option("inferSchema", "false") \
                 .option("treatEmptyValuesAsNulls", "true") \
-                .option("dataAddress", "'Planilha1'!A1") \
+                .option("dataAddress", f"'{nome_primeira_aba}'!A1") \
                 .load(path_origem)
-            
-            # Se o DataFrame vier vazio (0 colunas ou 0 linhas), tenta ler sem especificar aba
-            # Isso força o Spark a pegar a primeira aba ativa, seja qual for o nome
-            if len(df_raw.columns) == 0 or df_raw.rdd.isEmpty():
-                 df_raw = spark.read.format("com.crealytics.spark.excel") \
-                    .option("header", "true") \
-                    .option("inferSchema", "false") \
-                    .load(path_origem)
 
-            # Se continuar vazio após as tentativas, aborta este arquivo
-            if len(df_raw.columns) == 0: 
-                print("⚠️ VAZIO ou ILEGÍVEL")
-                erros[arquivo] = "Arquivo sem colunas detectáveis"
+            if len(df_raw.columns) == 0 or df_raw.rdd.isEmpty():
+                print("⚠️ VAZIO")
+                erros[arquivo] = "Arquivo vazio ou sem colunas"
                 continue
 
-            # 2. Processamento Único
-            # AQUI ESTÁ A SIMPLIFICAÇÃO: Chamamos apenas process_dataframe
-            # Ela já chama clean_column_names internamente.
+            # Processamento
             df_final = process_dataframe(df_raw)
             
-            # 3. Gravação em Parquet
-            # Mode 'overwrite' substitui se já existir. Compression 'snappy' é padrão e rápido.
-            df_final.write \
-                .mode("overwrite") \
-                .option("compression", "snappy") \
-                .parquet(path_destino)
+            # Gravação
+            df_final.write.mode("overwrite").option("compression", "snappy").parquet(path_destino)
             
             print("✅ OK")
             sucessos += 1
             
         except Exception as e:
-            # Captura erro sem parar o script todo
-            msg_erro = str(e).split('\n')[0][:100] # Pega só a primeira linha do erro para não poluir
+            msg_erro = str(e).split('\n')[0][:100]
             print(f"❌ FALHA ({msg_erro}...)")
             erros[arquivo] = str(e)
 
-print("\n" + "="*50)
-print(f"RELATÓRIO FINAL DE EXECUÇÃO")
-print(f"Arquivos Processados: {sucessos} de {total_arquivos}")
+print("\n" + "="*40)
+print(f"RELATÓRIO FINAL: {sucessos}/{total_arquivos} arquivos.")
 if erros:
-    print(f"\n⚠️ {len(erros)} Arquivos com Falha:")
-    for arq, msg in erros.items():
-        print(f" - {arq}: {msg[:150]}...")
-else:
-    print("\n🎉 Sucesso total! Todos os arquivos foram convertidos.")
-print("="*50)
-print("--- Fim da Célula 6 ---")
+    print(f"Falhas: {len(erros)}")
+    # Salva log de erros em arquivo para facilitar debug
+    with open("erros_conversao.log", "w") as f:
+        for arq, msg in erros.items():
+            f.write(f"{arq}: {msg}\n")
+    print("Detalhes salvos em 'erros_conversao.log'")
+print("="*40)
