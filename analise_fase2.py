@@ -1,22 +1,28 @@
 # ==============================================================================
-# FASE 2: Análise Exploratória de Dados (EDA) e Mineração
+# FASE 2: Análise Exploratória de Dados (EDA) e Mineração (Completo)
 # Arquivo: analise_fase2.py
 # ==============================================================================
 
 import os
 import sys
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Importações Spark
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
+from pyspark.sql.functions import col, size, lower, avg, stddev, abs as _abs, round as _round, max as _max, min as _min, count
+from pyspark.sql.window import Window
+from pyspark.ml.feature import Tokenizer, StopWordsRemover, CountVectorizer, IDF
+from pyspark.ml.clustering import KMeans
 
 # --- 1. Configuração de Ambiente (Windows) ---
-# Garante que o PySpark use o Python correto do ambiente virtual
 os.environ['PYSPARK_PYTHON'] = sys.executable
 os.environ['PYSPARK_DRIVER_PYTHON'] = sys.executable
 
 print("--- Iniciando Fase 2: Análise Exploratória ---")
 
-# --- 2. Inicializando Sessão Spark (Leve) ---
-# Nota: Não precisamos mais do JAR de Excel, pois leremos Parquet nativo.
+# --- 2. Inicializando Sessão Spark ---
 spark = SparkSession.builder \
     .appName("Analise_Gastos_Fase2") \
     .config("spark.driver.memory", "4g") \
@@ -26,11 +32,9 @@ spark = SparkSession.builder \
     .master("local[*]") \
     .getOrCreate()
 
-# Otimização: Habilita Apache Arrow para converter Spark -> Pandas mais rápido (útil para gráficos)
+# Otimização Arrow
 spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "true")
-
 spark.sparkContext.setLogLevel("WARN")
-print(f"✅ Sessão Spark iniciada (Versão {spark.version})")
 
 # --- 3. Carregamento dos Dados ---
 BASE_DIR = os.path.join(os.getcwd(), "dados")
@@ -38,219 +42,221 @@ input_path = os.path.join(BASE_DIR, "Consolidado_Final")
 
 print(f"📂 Buscando base consolidada em: {input_path}")
 
-if os.path.exists(input_path):
-    try:
-        # Leitura do Parquet (O Spark já entende o schema automaticamente)
-        df = spark.read.parquet(input_path)
-        
-        # Cache: Como vamos usar esse DataFrame repetidas vezes para várias análises,
-        # colocamos ele na memória para não ler do disco toda hora.
-        df.cache()
-        
-        count = df.count()
-        print(f"✅ Sucesso! Base carregada com {count} registros.")
-        
-        print("\n--- Estrutura dos Dados (Schema) ---")
-        df.printSchema()
-        
-        print("\n--- Amostra Inicial (Top 5) ---")
-        df.show(5, truncate=True)
-        
-    except Exception as e:
-        print(f"❌ Erro ao ler o arquivo Parquet: {e}")
-else:
-    print(f"❌ ARQUIVO NÃO ENCONTRADO. Verifique se a Fase 1 gerou a pasta: {input_path}")
+if not os.path.exists(input_path):
+    print(f"❌ ARQUIVO NÃO ENCONTRADO: {input_path}")
+    sys.exit() # Encerra se não achar o arquivo
 
-# --- Fim do Script Inicial ---
+try:
+    df = spark.read.parquet(input_path)
+    df.cache() # Cache do dataset bruto
+    print(f"✅ Base carregada: {df.count()} registros.")
+except Exception as e:
+    print(f"❌ Erro leitura: {e}")
+    sys.exit()
 
 # ==============================================================================
-# CÉLULA 6: NLP - Tokenização e Remoção de Stopwords
+# CÉLULA 6 (V13): NLP - Remoção de Conectivos e Termos de Ação
 # ==============================================================================
 from pyspark.ml.feature import Tokenizer, StopWordsRemover
-from pyspark.sql.functions import col, size, lower
+from pyspark.sql.functions import col, size, regexp_replace, expr
 
-print("--- Iniciando Processamento de Linguagem Natural (NLP) ---")
+print("--- Iniciando NLP V13 (Removendo 'Devido', 'Realização' e cia) ---")
 
-# 1. Definição de Stopwords (Palavras para remover)
-# O Spark tem stopwords padrão em inglês. Para PT-BR + Termos Públicos, precisamos de uma lista customizada.
+# 1. Limpeza de Caracteres
+df_clean_chars = df.withColumn("objeto_limpo", 
+                               regexp_replace(col("objeto_aquisicao"), r"[^a-z]", " "))
+
+# 2. Stopwords
 stopwords_pt_custom = [
-    # --- Artigos e Preposições Comuns (PT-BR) ---
+    # Artigos/Preposições/Pronomes
     "de", "a", "o", "que", "e", "do", "da", "em", "um", "para", "com", "nao", "uma", "os", "no", 
     "se", "na", "por", "mais", "as", "dos", "como", "mas", "ao", "ele", "das", "seu", "sua", "ou", 
     "quando", "muito", "nos", "ja", "eu", "tambem", "so", "pelo", "pela", "ate", "isso", "ela", 
     "entre", "depois", "sem", "mesmo", "aos", "seus", "quem", "nas", "me", "esse", "eles", "você", 
-    "essa", "num", "nem", "suas", "meu", "as", "minha", "numa", "pelos", "elas", "qual", "nos", 
-    "lhe", "deles", "essas", "esses", "pelas", "este", "dele", 
+    "foi", "desta", "deste", "pelas", "pelos", "nesta", "neste", 
     
-    # --- Termos Genéricos de Compras Públicas (Ruído para Clusterização) ---
-    # Queremos agrupar "Caneta", não agrupar todo mundo que escreveu "Aquisição"
+    # NOVOS VILÕES (Detectados no Raio-X do Cluster 5)
+    "devido", "ser", "realizacao", "fixacao", "reposicao", "dois", "reparos", "equipamentos", 
+    "prr", "covid", "bateria", # Bateria é genérico (carro? pilha?), melhor remover se for vago
+    
+    # Termos Genéricos / Burocracia
     "aquisicao", "referente", "pagamento", "despesa", "servico", "servicos", "material", 
     "fornecimento", "nf", "nfs", "nota", "fiscal", "cupom", "valor", "pgto", "compra", 
-    "consumo", "suprimento", "fundo", "recurso", "objeto", "item", "unidade", "unid", 
+    "consumo", "suprimento", "fundo", "recurso", "objeto", "item", "itens", "unidade", "unid", 
     "cx", "pct", "pc", "kg", "litro", "litros", "qtd", "quantidade", "nao", "informado",
-    "prestacao", "manutencao", "uso", "aplicacao"
+    "prestacao", "manutencao", "uso", "aplicacao", "total", "unitario", "valor",
+    "atender", "solicitacao", "pregao", "ata", "registro", "preco", "conforme", "atendimento",
+    "razao", "urgente", "disponivel", "utilizado", "pequeno", "grande", "novo", "velho", "aparelho", 
+    "oficial", "produtos", 
+    
+    # Justificativas
+    "acabar", "prestes", "falta", "rotina", "emergencia", "urgencia",
+    
+    # Instituições, Locais e CARGOS
+    "pr", "rs", "prm", "dr", "dra", "sr", "sra", "ltda", "me", "epp", "sa", "co", "s/a",
+    "prmcruz", "altars", "sede", "prrs", "cnpj", "cpf", "procuradoria", "empresa", "orgao",
+    "procurador", "republica", "servidores", "servidor",
+    "blumenau", 
+    
+    # Ações e Adjetivos
+    "instalacao", "substituicao", "conserto", "reparo", "troca", "confeccao", "locacao",
+    "gabinete", "sala", "almoxarifado", "estoque", "deposito", "setor", "unidades", "andar",
+    "materiais", "diversos", "pedagio", "utilizacao", "emergencial", "seguranca", "sistema"
 ]
 
-print(f"Lista de Stopwords carregada com {len(stopwords_pt_custom)} termos.")
-
 try:
-    # 2. Tokenização (Transforma frase "compra de caneta" em vetor ["compra", "de", "caneta"])
-    # Nota: O inputCol deve ser o texto limpo da Fase 1 ("objeto_aquisicao")
-    tokenizer = Tokenizer(inputCol="objeto_aquisicao", outputCol="words_raw")
-    df_tokenized = tokenizer.transform(df)
+    tokenizer = Tokenizer(inputCol="objeto_limpo", outputCol="words_raw")
+    df_tokenized = tokenizer.transform(df_clean_chars)
 
-    # 3. Remoção de Stopwords
-    remover = StopWordsRemover(inputCol="words_raw", outputCol="words_filtered")
-    # Carrega nossa lista customizada
+    remover = StopWordsRemover(inputCol="words_raw", outputCol="words_temp")
     remover.setStopWords(stopwords_pt_custom)
-    
-    df_clean_nlp = remover.transform(df_tokenized)
+    df_clean_temp = remover.transform(df_tokenized)
 
-    # 4. Limpeza Final (Opcional, mas boa para performance)
-    # Removemos palavras vazias que podem ter sobrado e linhas que ficaram vazias após limpar
-    # Ex: Se a descrição era "Pagamento de Despesa", sobrou [], isso não serve para clusterizar.
+    # FILTRO SQL (Mantido igual)
+    filter_expression = """
+        filter(words_temp, x -> 
+            x != '' AND 
+            length(x) > 2 AND 
+            NOT (length(x) == 4 AND substring(x, 1, 2) == 'pr') AND
+            substring(x, 1, 6) != 'necess' AND
+            substring(x, 1, 6) != 'demand'
+        )
+    """
+    
+    df_clean_nlp = df_clean_temp.withColumn("words_filtered", expr(filter_expression))
+
     df_final_nlp = df_clean_nlp.filter(size(col("words_filtered")) > 0)
 
-    print("✅ Tokenização e Limpeza concluídas.")
-    print(f"Total de registros prontos para vetorização: {df_final_nlp.count()}")
-
-    print("\n--- Comparativo: Antes vs Depois (Top 10) ---")
-    df_final_nlp.select("objeto_aquisicao", "words_filtered").show(10, truncate=False)
+    print("✅ NLP V13 concluído.")
+    df_final_nlp.select("objeto_aquisicao", "words_filtered").show(5, truncate=False)
 
 except Exception as e:
-    print(f"❌ Erro no NLP: {e}")
+    print(f"❌ Erro NLP: {e}")
 
 # ==============================================================================
-# CÉLULA 7: Vetorização (CountVectorizer + IDF)
+# CÉLULA 7 (V6): Vetorização + Normalização L2
 # ==============================================================================
-from pyspark.ml.feature import CountVectorizer, IDF
+from pyspark.ml.feature import Normalizer
 
-print("--- Iniciando Vetorização (TF-IDF) ---")
-
+print("\n--- Vetorização V6 (Com Normalização) ---")
 try:
-    # 1. CountVectorizer (Calcula a Frequência do Termo - TF)
-    # vocabSize: Limita o vocabulário às 10.000 palavras mais comuns (evita ruído excessivo)
-    # minDF: Ignora palavras que aparecem em menos de 2 documentos (erros de digitação únicos)
-    cv = CountVectorizer(inputCol="words_filtered", outputCol="raw_features", vocabSize=10000, minDF=2.0)
-    
+    # 1. CountVectorizer (Vocabulário Rico)
+    cv = CountVectorizer(inputCol="words_filtered", outputCol="raw_features", 
+                         vocabSize=20000, minDF=1.0, maxDF=0.1) 
     cv_model = cv.fit(df_final_nlp)
     df_tf = cv_model.transform(df_final_nlp)
     
-    print(f"Vocabulário aprendido: {len(cv_model.vocabulary)} palavras únicas.")
-
-    # 2. IDF (Inverse Document Frequency - Dá peso à raridade)
-    idf = IDF(inputCol="raw_features", outputCol="features")
+    # 2. IDF
+    idf = IDF(inputCol="raw_features", outputCol="idf_features") # Mudei nome output
     idf_model = idf.fit(df_tf)
-    df_tfidf = idf_model.transform(df_tf)
+    df_idf = idf_model.transform(df_tf)
 
-    print("✅ Vetorização concluída.")
+    # 3. NORMALIZAÇÃO (O Pulo do Gato para Texto)
+    # Transforma os vetores para que todos tenham a mesma "norma" (magnitude).
+    # Isso faz o K-Means funcionar baseando-se no ângulo (similaridade de cosseno)
+    normalizer = Normalizer(inputCol="idf_features", outputCol="features", p=2.0)
+    df_tfidf = normalizer.transform(df_idf)
     
-    # Mostra um exemplo do vetor gerado
-    # O vetor é "esparso": (Tamanho, [Indices das palavras], [Pesos TF-IDF])
-    print("\n--- Amostra do Vetor Matemático (Features) ---")
-    df_tfidf.select("words_filtered", "features").show(5, truncate=80)
+    df_tfidf.cache()
+    print("✅ Vetorização e Normalização concluídas.")
 
 except Exception as e:
-    print(f"❌ Erro na Vetorização: {e}")
+    print(f"❌ Erro Vetorização: {e}")
 
+# # ==============================================================================
+# # CÉLULA 8: Método do Cotovelo (Opcional - Pode comentar se já definiu K)
+# # ==============================================================================
+# print("\n--- Método do Cotovelo ---")
+# try:
+#     costs = []
+#     ks = range(2, 10) # Reduzi range para ser mais rápido no teste
+    
+#     print("Calculando Inércia (Aguarde)...")
+#     for k in ks:
+#         kmeans = KMeans(featuresCol="features", k=k, seed=42)
+#         model = kmeans.fit(df_tfidf)
+#         cost = model.summary.trainingCost
+#         costs.append(cost)
+#         print(f"   k={k} -> Custo={cost:,.0f}")
+    
+#     # Salva gráfico sem bloquear a execução
+#     plt.figure(figsize=(10, 6))
+#     plt.plot(ks, costs, 'bo-')
+#     plt.title('Método do Cotovelo')
+#     plt.savefig("grafico_cotovelo_final.png")
+#     print("📊 Gráfico salvo. (Feche a janela se ela abrir para continuar)")
+#     # plt.show() # Comentei para não travar a automação
+
+# except Exception as e:
+#     print(f"❌ Erro Cotovelo: {e}")
 
 # ==============================================================================
-# CÉLULA 8: Definição do K Ideal (Método do Cotovelo Otimizado)
+# CÉLULA 9: Clusterização Hierárquica (Bisecting K-Means)
 # ==============================================================================
-from pyspark.ml.clustering import KMeans
-import matplotlib.pyplot as plt
-import numpy as np
+from pyspark.ml.clustering import BisectingKMeans # <--- Novo Import
 
-print("--- Iniciando Método do Cotovelo (Otimizado) ---")
+# Bisecting K-Means funciona melhor para quebrar clusters gigantes
+K_FINAL = 15  # Aumentei para 25 para forçar quebra de sub-temas
 
-# 1. Performance: Coloca os dados vetorizados na memória
-# Se não fizer isso, o Spark reprocessa o TF-IDF a cada loop (Lento!)
-df_tfidf.cache()
-print(f"Dados em cache. Total de registros: {df_tfidf.count()}")
-
-costs = []
-ks = range(2, 13)  # Testa de 2 a 12 grupos
+print(f"\n--- Aplicando Bisecting K-Means (k={K_FINAL}) ---")
 
 try:
-    print("Calculando custos (Inércia)...")
+    # minDivisibleClusterSize: Garante que ele continue dividindo até clusters pequenos
+    bkmeans = BisectingKMeans(featuresCol="features", k=K_FINAL, seed=1, 
+                              predictionCol="prediction", minDivisibleClusterSize=100)
     
-    for k in ks:
-        # Treina K-Means
-        kmeans = KMeans(featuresCol="features", k=k, seed=42)
-        model = kmeans.fit(df_tfidf)
-        
-        # Obtém o custo (Soma dos erros quadráticos)
-        cost = model.summary.trainingCost
-        costs.append(cost)
-        print(f"   > k={k} : Custo={cost:,.0f}")
-
-    # 2. Inteligência: Tenta achar o 'Cotovelo' matematicamente
-    # A ideia é achar o ponto onde a curva 'dobra' mais forte (maior distância da linha reta)
-    # ou onde a redução do erro desacelera.
+    model_final = bkmeans.fit(df_tfidf)
+    df_clustered = model_final.transform(df_tfidf)
     
-    # Cálculo simples da derivada (redução percentual)
-    diffs = [costs[i] - costs[i+1] for i in range(len(costs)-1)]
+    print(f"✅ Clusterização Hierárquica concluída. Registros: {df_clustered.count()}")
     
-    # Sugere o K onde a redução começa a ficar marginal (menos de 10% do drop inicial)
-    drop_inicial = diffs[0]
-    k_sugerido = 0
-    
-    print("\n--- Análise de Redução de Erro ---")
-    for i, drop in enumerate(diffs):
-        k_atual = ks[i+1] # O drop é calculado indo para esse K
-        ratio = drop / drop_inicial
-        print(f"   Mudar para k={k_atual}: Reduz o erro em {drop:,.0f} ({ratio:.1%} do inicial)")
-        
-        # Regra de ouro: Se o ganho for menor que 20% do ganho inicial, paramos.
-        if ratio < 0.20 and k_sugerido == 0:
-            k_sugerido = k_atual
-
-    if k_sugerido == 0: k_sugerido = 7 # Fallback se a regra falhar
-    
-    print(f"\n💡 K Sugerido Matematicamente: {k_sugerido}")
-
-    # 3. Visualização
-    plt.figure(figsize=(10, 6))
-    plt.plot(ks, costs, 'bo-', label='Custo (Inércia)')
-    
-    # Marca o ponto sugerido
-    idx_sug = ks.index(k_sugerido)
-    plt.plot(k_sugerido, costs[idx_sug], 'ro', markersize=12, label=f'Cotovelo Sugerido (k={k_sugerido})')
-    
-    plt.title(f'Método do Cotovelo (Melhor k ~ {k_sugerido})')
-    plt.xlabel('Número de Clusters (k)')
-    plt.ylabel('Custo (Soma dos Erros Quadráticos)')
-    plt.grid(True)
-    plt.legend()
-    
-    plt.savefig("grafico_cotovelo_otimizado.png")
-    print("📊 Gráfico salvo como 'grafico_cotovelo_otimizado.png'")
-    plt.show()
+    print("\n--- Distribuição Final dos Clusters ---")
+    df_distribution = df_clustered.groupBy("prediction").count().orderBy("prediction")
+    df_distribution.show(30) # Mostra até 30 linhas
 
 except Exception as e:
-    print(f"❌ Erro no cálculo: {e}")
+    print(f"❌ Erro Bisecting K-Means: {e}")
 
-    # ==============================================================================
-# CÉLULA 9: Aplicação do K-Means (k=6)
 # ==============================================================================
-from pyspark.ml.clustering import KMeans
-from pyspark.sql.functions import col
-
-# Configuração Definida
-K_FINAL = 6
-
-print(f"--- Aplicando K-Means Definitivo (k={K_FINAL}) ---")
+# CÉLULA 10: Detecção de Anomalias (Z-Score) - A PARTE QUE FALTAVA
+# ==============================================================================
+print("\n--- Detecção de Anomalias (Z-Score) ---")
 
 try:
-    # 1. Treinamento
-    kmeans = KMeans(featuresCol="features", k=K_FINAL, seed=1, predictionCol="prediction")
-    model = kmeans.fit(df_tfidf)
+    w = Window.partitionBy("prediction")
+
+    # Calcula estatísticas do grupo
+    df_analise = df_clustered.withColumn("media_grupo", avg("valor_transacao").over(w)) \
+                             .withColumn("stddev_grupo", stddev("valor_transacao").over(w))
+
+    # Calcula Z-Score (Quão longe da média o valor está?)
+    df_zscore = df_analise.withColumn("z_score", 
+                                      (col("valor_transacao") - col("media_grupo")) / col("stddev_grupo"))
+
+    # Filtra Outliers (Z-Score > 3)
+    df_outliers = df_zscore.filter(col("z_score") > 3)
     
-    # 2. Predição (Adiciona a coluna 'prediction' com o nº do grupo)
-    df_clustered = model.transform(df_tfidf)
+    qtd_outliers = df_outliers.count()
+    print(f"🚩 ALERTA: {qtd_outliers} anomalias detectadas (Z-Score > 3).")
     
-    print("✅ Clusterização concluída.")
-    print(f"Total de registros classificados: {df_clustered.count()}")
+    # Formatação para visualização
+    df_show = df_outliers.select(
+        "prediction", 
+        _round("z_score", 2).alias("z_score"), 
+        "valor_transacao", 
+        _round("media_grupo", 2).alias("media_ref"), 
+        "objeto_aquisicao", 
+        "nome_favorecido"
+    ).orderBy(col("z_score").desc())
+
+    print("\n--- Top 10 Anomalias Críticas ---")
+    df_show.show(10, truncate=False)
+
+    # Opcional: Salvar resultado
+    # df_show.write.csv("Relatorio_Anomalias.csv", header=True)
 
 except Exception as e:
-    print(f"❌ Erro no K-Means: {e}")
+    print(f"❌ Erro Z-Score: {e}")
+
+print("\n✅ Script Finalizado.")
+
