@@ -119,44 +119,84 @@ print("   Nota: Utilitário 'dbutils' foi substituído por funções nativas 'os
 
 
 # ==============================================================================
-# CÉLULA 2: Mapeamento de colunas e definição de Schema
+# CÉLULA 2: Mapeamento de colunas e definição de Schema (Completo)
 # ==============================================================================
 
-print("\n--- Executando Célula 2: Definição de Schemas ---")
+print("\n--- Executando Célula 2: Definição de Schemas (Estendido) ---")
 
 output_folder_name = "final"
 output_path_final = os.path.join(output_base_path, output_folder_name)
 
 # 1. Mapeamento: Traduz nomes de colunas bagunçados para um padrão único
+# Adicionamos aqui as colunas de texto (nomes, datas, órgãos) para auditoria.
 column_name_mapping = {
+    # --- Chaves Primárias e Valores ---
     "ano": "ano",
-    "cpf do suprido": "cpf_suprido",
-    "cpf/cnpj favorecido": "cpf_cnpj_favorecido",
-    "cpf/cnpj do favorecido": "cpf_cnpj_favorecido",
-    "objeto da aquisição": "objeto_aquisicao",
-    "motivo": "objeto_aquisicao",  # Em 2016 usavam "motivo" em vez de objeto
-    " objeto da aquisição ": "objeto_aquisicao",
-    "objeto da aquisição ": "objeto_aquisicao",
     "valor": "valor",
     " valor ": "valor",
     " valor": "valor",
-    "objeto da aquisicao": "objeto_aquisicao"
+    
+    # --- Identificação do Suprido (Quem gastou) ---
+    "cpf do suprido": "cpf_suprido",
+    "cpf portador": "cpf_suprido",
+    "nome do suprido": "nome_suprido",
+    "nome do portador": "nome_suprido",
+    "nome portador": "nome_suprido",
+
+    # --- Identificação do Favorecido (Quem recebeu) ---
+    "cpf/cnpj favorecido": "cpf_cnpj_favorecido",
+    "cpf/cnpj do favorecido": "cpf_cnpj_favorecido",
+    "cnpj ou cpf favorecido": "cpf_cnpj_favorecido",
+    "nome do favorecido": "nome_favorecido",
+    "nome favorecido": "nome_favorecido",
+    "favorecido": "nome_favorecido",
+
+    # --- Detalhes da Compra ---
+    "objeto da aquisição": "objeto_aquisicao",
+    "objeto da aquisicao": "objeto_aquisicao",
+    "motivo": "objeto_aquisicao",  # Em 2016 usavam "motivo"
+    " objeto da aquisição ": "objeto_aquisicao",
+    "transação": "tipo_transacao",
+    "transacao": "tipo_transacao",
+    "data": "data_transacao",
+    "data transação": "data_transacao",
+    "data da transação": "data_transacao",
+
+    # --- Órgãos Públicos ---
+    "nome do órgão": "nome_orgao",
+    "nome órgão": "nome_orgao",
+    "nome do orgao": "nome_orgao",
+    "órgão superior": "orgao_superior",
+    "código órgão": "codigo_orgao"
 }
 
-# 2. Schema: Define o tipo de dado de cada coluna (Texto, Inteiro, Decimal)
+# 2. Schema: Define o tipo de dado de TODAS as colunas
+# Nota: Lemos datas como String inicialmente para evitar erros de formatação (DD/MM vs MM/DD)
 schema_base = StructType([
+    # --- Dados Matemáticos (Base para IA) ---
     StructField("ano", IntegerType(), True),
+    StructField("valor", DecimalType(12, 2), True),
+    
+    # --- Identificadores (Chaves) ---
     StructField("cpf_suprido", StringType(), True),
     StructField("cpf_cnpj_favorecido", StringType(), True),
-    StructField("objeto_aquisicao", StringType(), True),
-    StructField("valor", DecimalType(12, 2), True)
+    
+    # --- Dados Descritivos (Base para Auditoria Humana) ---
+    StructField("nome_suprido", StringType(), True),      # Nome do servidor
+    StructField("nome_favorecido", StringType(), True),   # Nome da empresa/pessoa
+    StructField("nome_orgao", StringType(), True),        # Ex: Ministério da Saúde
+    StructField("orgao_superior", StringType(), True),    # Hierarquia acima
+    StructField("objeto_aquisicao", StringType(), True),  # O que foi comprado
+    StructField("tipo_transacao", StringType(), True),    # Ex: Saque, Compra
+    StructField("data_transacao", StringType(), True)     # Data exata
 ])
 
 # Lista das colunas finais que queremos manter
 desired_final_columns = [field.name for field in schema_base.fields]
 
-print(f"✅ Schema definido.")
-print(f"   Colunas alvo: {desired_final_columns}")
+print(f"✅ Schema Estendido definido.")
+print(f"   Total de Colunas Mapeadas: {len(desired_final_columns)}")
+print(f"   Colunas: {desired_final_columns}")
 
 # Verificação simples se a pasta de entrada tem conteúdo
 try:
@@ -168,7 +208,6 @@ except Exception as e:
     print(f"   ⚠️ AVISO: Erro ao verificar entrada: {e}")
 
 print("--- Fim da Célula 2 ---")
-
 
 
 # ==============================================================================
@@ -445,6 +484,13 @@ try:
     # 6. Amostra
     print("\n--- Amostra dos Dados Finais ---")
     df_filtered.select("ano", "valor", "objeto_aquisicao").show(5, truncate=80)
+
+    df_filtered.printSchema()
+# ... código da consolidação (escrita do parquet) ...
+
+    print("Amostra dos dados consolidados:")
+
+
 
 except Exception as e:
     print(f"❌ Erro na consolidação: {e}")
