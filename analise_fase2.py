@@ -54,6 +54,25 @@ except Exception as e:
     print(f"❌ Erro leitura: {e}")
     sys.exit()
 
+
+# ==============================================================================
+# CORREÇÃO CRÍTICA: Remoção de Duplicatas
+# ==============================================================================
+print(f"\n--- Saneamento da Base ---")
+print(f"Total Bruto: {df.count()}")
+
+# Remove linhas onde Objeto, Valor e Favorecido são idênticos
+# Isso elimina as repetições causadas pela fusão de células no Excel
+df = df.dropDuplicates(['objeto_aquisicao', 'valor_transacao', 'nome_favorecido'])
+
+# Força o recálculo e cache na memória
+df.cache()
+count_real = df.count()
+
+print(f"✅ Total Real (Únicos): {count_real}")
+print(f"🗑️ Lixo Removido: {54196 - count_real}")
+
+
 # ==============================================================================
 # CÉLULA 6 (V13): NLP - Remoção de Conectivos e Termos de Ação
 # ==============================================================================
@@ -163,59 +182,32 @@ try:
 except Exception as e:
     print(f"❌ Erro Vetorização: {e}")
 
-# # ==============================================================================
-# # CÉLULA 8: Método do Cotovelo (Opcional - Pode comentar se já definiu K)
-# # ==============================================================================
-# print("\n--- Método do Cotovelo ---")
-# try:
-#     costs = []
-#     ks = range(2, 10) # Reduzi range para ser mais rápido no teste
-    
-#     print("Calculando Inércia (Aguarde)...")
-#     for k in ks:
-#         kmeans = KMeans(featuresCol="features", k=k, seed=42)
-#         model = kmeans.fit(df_tfidf)
-#         cost = model.summary.trainingCost
-#         costs.append(cost)
-#         print(f"   k={k} -> Custo={cost:,.0f}")
-    
-#     # Salva gráfico sem bloquear a execução
-#     plt.figure(figsize=(10, 6))
-#     plt.plot(ks, costs, 'bo-')
-#     plt.title('Método do Cotovelo')
-#     plt.savefig("grafico_cotovelo_final.png")
-#     print("📊 Gráfico salvo. (Feche a janela se ela abrir para continuar)")
-#     # plt.show() # Comentei para não travar a automação
 
-# except Exception as e:
-#     print(f"❌ Erro Cotovelo: {e}")
 
 # ==============================================================================
-# CÉLULA 9: Clusterização Hierárquica (Bisecting K-Means)
+# CÉLULA 9: Clusterização Padrão (K-Means Clássico)
 # ==============================================================================
-from pyspark.ml.clustering import BisectingKMeans # <--- Novo Import
+from pyspark.ml.clustering import KMeans
 
-# Bisecting K-Means funciona melhor para quebrar clusters gigantes
-K_FINAL = 15  # Aumentei para 25 para forçar quebra de sub-temas
+# Com 12.000 registros, K=12 deve dar grupos de ~1000 itens
+K_FINAL = 12 
 
-print(f"\n--- Aplicando Bisecting K-Means (k={K_FINAL}) ---")
+print(f"\n--- Aplicando K-Means Padrão (k={K_FINAL}) na Base Limpa ---")
 
 try:
-    # minDivisibleClusterSize: Garante que ele continue dividindo até clusters pequenos
-    bkmeans = BisectingKMeans(featuresCol="features", k=K_FINAL, seed=1, 
-                              predictionCol="prediction", minDivisibleClusterSize=100)
+    # Voltamos para o KMeans (saiu o Bisecting)
+    kmeans = KMeans(featuresCol="features", k=K_FINAL, seed=1, predictionCol="prediction")
     
-    model_final = bkmeans.fit(df_tfidf)
+    model_final = kmeans.fit(df_tfidf)
     df_clustered = model_final.transform(df_tfidf)
     
-    print(f"✅ Clusterização Hierárquica concluída. Registros: {df_clustered.count()}")
+    print(f"✅ Clusterização concluída. Registros únicos classificados: {df_clustered.count()}")
     
-    print("\n--- Distribuição Final dos Clusters ---")
-    df_distribution = df_clustered.groupBy("prediction").count().orderBy("prediction")
-    df_distribution.show(30) # Mostra até 30 linhas
+    print("\n--- Nova Distribuição dos Clusters (Base Saneada) ---")
+    df_clustered.groupBy("prediction").count().orderBy("prediction").show()
 
 except Exception as e:
-    print(f"❌ Erro Bisecting K-Means: {e}")
+    print(f"❌ Erro K-Means: {e}")
 
 # ==============================================================================
 # CÉLULA 10: Detecção de Anomalias (Z-Score) - A PARTE QUE FALTAVA
