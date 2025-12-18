@@ -82,8 +82,8 @@ from pyspark.sql.functions import col, size, regexp_replace, expr
 print("--- Iniciando NLP V13 (Removendo 'Devido', 'Realização' e cia) ---")
 
 # 1. Limpeza de Caracteres
-df_clean_chars = df.withColumn("objeto_limpo", 
-                               regexp_replace(col("objeto_aquisicao"), r"[^a-z]", " "))
+# Como deve ficar (Seguro):
+df_clean_chars = df.withColumn("objeto_limpo", regexp_replace(lower(col("objeto_aquisicao")), r"[^a-z]", " "))
 
 # 2. Stopwords
 stopwords_pt_custom = [
@@ -185,29 +185,31 @@ except Exception as e:
 
 
 # ==============================================================================
-# CÉLULA 9: Clusterização Padrão (K-Means Clássico)
+# CÉLULA 9 (V2): Clusterização Hierárquica (Bisecting K-Means)
 # ==============================================================================
-from pyspark.ml.clustering import KMeans
+from pyspark.ml.clustering import BisectingKMeans
 
-# Com 12.000 registros, K=12 deve dar grupos de ~1000 itens
-K_FINAL = 12 
+# Aumentamos K para 20 para garantir que "Copa", "TI" e "Obra" tenham quartos separados
+K_FINAL = 20 
 
-print(f"\n--- Aplicando K-Means Padrão (k={K_FINAL}) na Base Limpa ---")
+print(f"\n--- Aplicando Bisecting K-Means (k={K_FINAL}) ---")
+print("Este algoritmo força a divisão do cluster gigante em sub-temas.")
 
 try:
-    # Voltamos para o KMeans (saiu o Bisecting)
-    kmeans = KMeans(featuresCol="features", k=K_FINAL, seed=1, predictionCol="prediction")
+    # minDivisibleClusterSize=100: Garante que ele continue dividindo até chegar no detalhe
+    bkmeans = BisectingKMeans(featuresCol="features", k=K_FINAL, seed=1, 
+                              predictionCol="prediction", minDivisibleClusterSize=100)
     
-    model_final = kmeans.fit(df_tfidf)
+    model_final = bkmeans.fit(df_tfidf)
     df_clustered = model_final.transform(df_tfidf)
     
-    print(f"✅ Clusterização concluída. Registros únicos classificados: {df_clustered.count()}")
+    print(f"✅ Clusterização Hierárquica concluída.")
     
-    print("\n--- Nova Distribuição dos Clusters (Base Saneada) ---")
-    df_clustered.groupBy("prediction").count().orderBy("prediction").show()
+    print("\n--- Nova Distribuição (Agora deve estar equilibrada) ---")
+    df_clustered.groupBy("prediction").count().orderBy("prediction").show(25)
 
 except Exception as e:
-    print(f"❌ Erro K-Means: {e}")
+    print(f"❌ Erro: {e}")
 
 # ==============================================================================
 # CÉLULA 10: Detecção de Anomalias (Z-Score) - A PARTE QUE FALTAVA
@@ -251,4 +253,7 @@ except Exception as e:
     print(f"❌ Erro Z-Score: {e}")
 
 print("\n✅ Script Finalizado.")
+
+from pyspark.sql.functions import col, explode, desc
+
 
