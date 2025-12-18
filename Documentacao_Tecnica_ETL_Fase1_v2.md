@@ -1,11 +1,4 @@
-import os
-
-# ==============================================================================
-# Gerador de Documentação Técnica - Projeto Mineração de Gastos Públicos
-# Versão: Fase 1 (ETL Completo e Refinado)
-# ==============================================================================
-
-conteudo_docs = """# 📘 Manual Técnico Unificado: Pipeline ETL de Gastos Públicos
+# 📘 Manual Técnico Unificado: Pipeline ETL de Gastos Públicos
 
 **Projeto:** Mineração e Auditoria de Cartão Corporativo (CPGF)
 **Status:** Fase 1 Concluída (ETL, Limpeza Forense e Consolidação "Gold")
@@ -114,17 +107,3 @@ O arquivo `Consolidado_Final` possui a seguinte estrutura garantida:
 3.  **Saída:** O arquivo final estará em `dados/Consolidado_Final`.
 4.  **Análise:** Carregue este Parquet no Power BI, Tableau ou Pandas. Ele já está limpo, tipado e sem lixo.
 
-"""
-
-# Define o caminho para salvar o arquivo na pasta atual do projeto
-nome_arquivo = "Documentacao_Tecnica_ETL_Fase1_v2.md"
-caminho_completo = os.path.join(os.getcwd(), nome_arquivo)
-
-try:
-    with open(caminho_completo, "w", encoding="utf-8") as f:
-        f.write(conteudo_docs)
-    print(f"✅ Documentação atualizada gerada com sucesso!")
-    print(f"📂 Arquivo: {caminho_completo}")
-    print("   (Contém detalhes sobre Slugify, Regex Allowlist e Regras de Negócio)")
-except Exception as e:
-    print(f"❌ Erro ao gerar documentação: {e}")
