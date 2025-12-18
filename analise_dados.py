@@ -139,6 +139,7 @@ column_name_mapping = {
     # --- Identificação do Suprido (Quem gastou) ---
     "cpf do suprido": "cpf_suprido",
     "cpf portador": "cpf_suprido",
+    "suprido": "nome_suprido",
     "nome do suprido": "nome_suprido",
     "nome do portador": "nome_suprido",
     "nome portador": "nome_suprido",
@@ -161,6 +162,7 @@ column_name_mapping = {
     "data": "data_transacao",
     "data transação": "data_transacao",
     "data da transação": "data_transacao",
+    "data da aquisição": "data_transacao",
 
     # --- Órgãos Públicos ---
     "nome do órgão": "nome_orgao",
@@ -324,13 +326,74 @@ print("✅ Funções otimizadas (Correção total de acentuação: ã, ç, é ->
 print("--- Fim das Células 4 e 5 ---")
 
 # ==============================================================================
-# CÉLULA 6 (CORRIGIDA): Leitura Inteligente de Abas + Conversão
+# CÉLULA 6 (ATUALIZADA): Leitura Inteligente + Preservação de Colunas
 # ==============================================================================
 
-print("\n--- Executando Célula 6: Conversão XLS -> Parquet ---")
+print("\n--- Executando Célula 6: Conversão XLS -> Parquet (Completa) ---")
 
-# Importação necessária para ler nomes de abas
 import pandas as pd
+from pyspark.sql.functions import col, regexp_replace, trim, when, lit
+
+# --- FUNÇÃO DE PROCESSAMENTO REVISADA ---
+# Esta função garante que o DataFrame final tenha TODAS as colunas do novo Schema
+def process_dataframe(df_input):
+    # 1. Normalização de Nomes de Colunas (Remove acentos, espaços, minúsculas)
+    # Isso ajuda a bater com o dicionário 'column_name_mapping'
+    current_columns = df_input.columns
+    df_renamed = df_input
+    
+    for c in current_columns:
+        c_clean = c.strip().lower()
+        # Se o nome limpo estiver no nosso mapa, renomeia para o padrão final
+        if c_clean in column_name_mapping:
+            novo_nome = column_name_mapping[c_clean]
+            df_renamed = df_renamed.withColumnRenamed(c, novo_nome)
+    
+    # 2. Seleção e Tipagem
+    # Vamos criar uma lista de expressões para selecionar apenas o que interessa
+    # e garantir que colunas ausentes sejam criadas como nulas.
+    select_exprs = []
+    
+    for field in schema_base.fields:
+        col_name = field.name
+        col_type = field.dataType
+        
+        if col_name in df_renamed.columns:
+            # A coluna existe no arquivo: Aplicar tratamentos específicos
+            c = col(col_name)
+            
+            if col_name == "valor":
+                # Troca vírgula por ponto e converte para Decimal
+                expr = regexp_replace(c, ",", ".").cast(col_type).alias(col_name)
+                
+            elif col_name in ["cpf_suprido", "cpf_cnpj_favorecido"]:
+                # Remove tudo que não for número
+                expr = regexp_replace(c, "[^0-9]", "").alias(col_name)
+                
+            elif col_name == "ano":
+                # Converte para Inteiro
+                expr = c.cast("int").alias(col_name)
+                
+            else:
+                # Texto normal: Trim (remove espaços nas pontas)
+                expr = trim(c).alias(col_name)
+                
+            select_exprs.append(expr)
+            
+        else:
+            # A coluna NÃO existe neste arquivo (ex: arquivo antigo sem 'Nome Órgão')
+            # Criamos ela preenchida com NULL para manter o padrão do Parquet
+            select_exprs.append(lit(None).cast(col_type).alias(col_name))
+            
+    # Aplica a seleção final
+    df_final = df_renamed.select(*select_exprs)
+    
+    # Filtro de segurança: Linhas sem valor são inúteis
+    df_final = df_final.filter(col("valor").isNotNull())
+    
+    return df_final
+
+# --- LOOP PRINCIPAL DE PROCESSAMENTO ---
 
 total_arquivos = 0
 sucessos = 0
@@ -371,12 +434,11 @@ for ano in sorted(anos_a_processar):
         print(f"   🔄 {arquivo} ... ", end="")
         
         try:
-            # ESTRATÉGIA NOVA: Descobrir o nome da aba com Pandas (rápido e seguro)
-            # O Pandas lê apenas os metadados, não o arquivo todo, então é rápido.
+            # 1. Descobrir aba com Pandas
             xl = pd.ExcelFile(path_origem)
             nome_primeira_aba = xl.sheet_names[0]
             
-            # Agora mandamos o Spark ler exatamente essa aba
+            # 2. Leitura com Spark
             df_raw = spark.read.format("com.crealytics.spark.excel") \
                 .option("header", "true") \
                 .option("inferSchema", "false") \
@@ -389,10 +451,10 @@ for ano in sorted(anos_a_processar):
                 erros[arquivo] = "Arquivo vazio ou sem colunas"
                 continue
 
-            # Processamento
+            # 3. Processamento (Normalização + Seleção Completa)
             df_final = process_dataframe(df_raw)
             
-            # Gravação
+            # 4. Gravação
             df_final.write.mode("overwrite").option("compression", "snappy").parquet(path_destino)
             
             print("✅ OK")
@@ -407,7 +469,6 @@ print("\n" + "="*40)
 print(f"RELATÓRIO FINAL: {sucessos}/{total_arquivos} arquivos.")
 if erros:
     print(f"Falhas: {len(erros)}")
-    # Salva log de erros em arquivo para facilitar debug
     with open("erros_conversao.log", "w") as f:
         for arq, msg in erros.items():
             f.write(f"{arq}: {msg}\n")
