@@ -161,10 +161,24 @@ print("\n--- Vetorização V6 (Com Normalização) ---")
 try:
     # 1. CountVectorizer (Vocabulário Rico)
     cv = CountVectorizer(inputCol="words_filtered", outputCol="raw_features", 
-                         vocabSize=20000, minDF=1.0, maxDF=0.1) 
+                         vocabSize=10000, minDF=3.0, maxDF=0.1) 
     cv_model = cv.fit(df_final_nlp)
     df_tf = cv_model.transform(df_final_nlp)
     
+
+    # Diagnóstico de Vocabulário
+    vocab_maximo = cv_model.getVocabSize()
+    vocab_real = len(cv_model.vocabulary)
+
+    print(f"Tamanho configurado (Limite): {vocab_maximo}")
+    print(f"Palavras únicas encontradas: {vocab_real}")
+
+    if vocab_real == vocab_maximo:
+        print("⚠️ ALERTA: Seu vocabulário saturou! Você provavelmente está cortando palavras úteis. Aumente o vocabSize.")
+    else:
+        print(f"✅ O tamanho está ótimo. Sobraram {vocab_maximo - vocab_real} espaços vazios.")
+
+
     # 2. IDF
     idf = IDF(inputCol="raw_features", outputCol="idf_features") # Mudei nome output
     idf_model = idf.fit(df_tf)
