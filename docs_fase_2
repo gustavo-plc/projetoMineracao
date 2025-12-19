@@ -1,0 +1,150 @@
+import os
+
+# ==============================================================================
+# Gerador de Documentação Técnica - Projeto Mineração de Gastos Públicos
+# Versão: Fase 2 (Mineração de Dados, NLP e Machine Learning)
+# ==============================================================================
+
+conteudo_docs_fase2 = """# 📘 Manual Técnico Unificado: Fase 2 - Mineração e Auditoria Avançada
+
+**Projeto:** Mineração e Auditoria de Cartão Corporativo (CPGF)
+**Status:** Fase 2 Concluída (NLP, Clusterização e Detecção Híbrida de Anomalias)
+**Tecnologia:** Python 3.x + PySpark MLlib (Local/Windows)
+**Versão do Pipeline:** 2.0 (Consenso Estatístico + Supervisionado)
+
+---
+
+## 1. Visão Geral e Arquitetura
+
+A Fase 2 foca na transformação de dados textuais em inteligência auditável. O pipeline abandona a análise puramente descritiva para adotar modelos preditivos e estatísticos que identificam sobrepreço baseados em **semântica** (o que é o item) e **contexto** (em qual grupo ele se encaixa).
+
+### Fluxo de Processamento (Pipeline ML)
+1.  **Saneamento:** Remoção de duplicatas estritas para garantir integridade.
+2.  **NLP Cirúrgico:** Limpeza de "juridiquês" para isolar o objeto real da compra.
+3.  **Vetorização:** Transformação de texto em matemática (`Word2Vec`).
+4.  **Clusterização:** Agrupamento temático (`Bisecting K-Means`).
+5.  **Auditoria Paralela:**
+    * *Método A:* Estatística Intra-Cluster (`IQR/Boxplot`).
+    * *Método B:* Inteligência Artificial Global (`Random Forest Regressor`).
+6.  **Consenso e Enriquecimento:** Cruzamento dos métodos e recuperação de dados cadastrais (CPF/CNPJ).
+
+---
+
+## 2. Detalhamento Técnico dos Componentes
+
+### 2.1. Pré-Processamento e NLP (Limpeza Semântica)
+O objetivo é remover ruído burocrático para que o algoritmo foque no produto físico.
+
+* **Biblioteca:** `pyspark.ml.feature.StopWordsRemover` + Filtros SQL.
+* **Entrada:** Texto bruto (ex: "Aquisição emergencial de pneus").
+* **Execução:**
+    * **Stopwords:** Remoção de ~150 termos de processo (`necessidade`, `urgencia`, `vulto`, `solicitado`, `conforme`).
+    * **Filtros de Radical (SQL):** Remoção agressiva de termos iniciados em `almox*` (almoxarifado), `reemb*` (reembolso), `disponi*` (disponibilidade).
+* **Saída:** Lista de tokens limpa (ex: `['pneus']`).
+* **Impacto:** Evita que itens sejam agrupados por serem "urgentes" em vez de serem "pneus".
+
+### 2.2. Vetorização (Word2Vec)
+Ensina o computador a entender contexto e sinônimos.
+
+* **Biblioteca:** `pyspark.ml.feature.Word2Vec`
+* **Parâmetros Críticos:**
+    * `vectorSize`: **50** (Dimensão do vetor. Equilíbrio entre nuance e performance).
+    * `minCount`: **5** (Filtro de qualidade. Ignora palavras que aparecem < 5 vezes, eliminando "typos" e marcas raras).
+    * `windowSize`: **2** (Contexto curto).
+* **Entrada:** Lista de tokens filtrada.
+* **Saída:** Vetor Denso (`raw_features`) + Normalização L2 (`features`).
+
+### 2.3. Clusterização (Bisecting K-Means)
+Criação de "gavetas" temáticas para comparação justa de preços.
+
+* **Biblioteca:** `pyspark.ml.clustering.BisectingKMeans`
+* **Parâmetros:**
+    * `k`: **20** (Número de grupos final).
+    * `distanceMeasure`: **"cosine"** (Mede similaridade semântica pelo ângulo, não distância física).
+    * `minDivisibleClusterSize`: **100**.
+* **Saída:** Coluna `prediction` (ID do Cluster, 0 a 19).
+* **Lógica:** Algoritmo hierárquico (divisivo). Separa macro-temas (ex: "Serviços" vs "Produtos") e depois micro-temas ("Peças de Carro" vs "Material de Construção").
+
+---
+
+## 3. Metodologia de Detecção de Anomalias (O "Cérebro" da Auditoria)
+
+Utilizamos uma abordagem híbrida para reduzir falsos positivos. Um item só é considerado crítico se falhar em múltiplos testes ou tiver score de risco altíssimo.
+
+### Método 1: Estatística Intra-Cluster (IQR)
+Analisa o item em relação aos seus "vizinhos" de grupo.
+* **Técnica:** Intervalo Interquartil (Boxplot).
+* **Cálculo:**
+    * Teto = $Q3 + 1.5 \\times (Q3 - Q1)$
+* **Gatilho:** Valor > Teto **E** Valor > R$ 50,00.
+* **Ponto Forte:** Detecta o "ponto fora da curva" óbvio (ex: uma caneta de R$ 500 no cluster de papelaria).
+* **Ponto Fraco:** Cego se o cluster inteiro estiver contaminado.
+
+### Método 2: Predição Supervisionada (Random Forest)
+Analisa o item em relação ao "conhecimento global" da base.
+* **Biblioteca:** `pyspark.ml.regression.RandomForestRegressor`.
+* **Target:** `Log(Preço)` (Reduz distorção de valores bilionários).
+* **Parâmetros:**
+    * `numTrees`: **50** (Árvores de decisão independentes).
+    * `maxDepth`: **8** (Evita overfitting/decorar compras específicas).
+    * `minInstancesPerNode`: **5** (Exige repetição do padrão para validar a regra).
+* **Execução:** O modelo prevê quanto o item *deveria* custar baseado no texto.
+* **Gatilho:** Preço Pago > 3x Preço Estimado.
+* **Ponto Forte:** Detecta erros de classificação (ex: um parafuso que caiu no cluster de carros por engano será pego aqui, pois o texto diz "parafuso").
+
+---
+
+## 4. Consolidação e Score de Risco
+
+A etapa final cruza os dois métodos para gerar a "Lista de Ouro" da auditoria.
+
+### 4.1. Fórmula de Risco
+O Score unifica a gravidade das duas detecções:
+$$Score = (Fator\_ML) + \\frac{Excesso\_IQR(\%)}{100}$$
+
+* *Exemplo:* Um item custou 10x o estimado pelo robô (ML) e furou o teto do cluster em 500% (IQR).
+    * Score = 10 + 5 = **15**.
+
+### 4.2. Filtro de Corte (Threshold)
+* **Regra:** `Score_Risco > 10`.
+* **Objetivo:** Isolar apenas as anomalias indefensáveis para a auditoria manual.
+
+### 4.3. Enriquecimento (Rastreabilidade)
+O script final realiza um *Join* reverso com o Dataset Original para recuperar:
+* **Quem comprou:** `unidade_gestora`, `cpf_suprido`, `nome_suprido`.
+* **Quem recebeu:** `nome_favorecido`, `cpf_cnpj_favorecido`.
+* **Quando:** `data_aquisicao`.
+
+---
+
+## 5. Dicionário de Saídas (Artifacts)
+
+| Arquivo Gerado | Descrição | Uso Principal |
+| :--- | :--- | :--- |
+| `relatorio_outliers_iqr.csv` | Todas as anomalias estatísticas por cluster. | Análise de dispersão de preços dentro dos grupos. |
+| `auditoria_ml_random_forest.csv` | Todas as discrepâncias Texto vs. Preço. | Identificar itens caros mal classificados. |
+| `AUDITORIA_COMPLETA_RASTREAVEL.csv` | **Relatório Final**. Cruzamento ML + IQR com dados cadastrais. | **Auditoria e Investigação**. Contém o Score de Risco. |
+
+---
+
+## 6. Como Executar (Fase 2)
+
+1.  **Pré-requisito:** Ter o arquivo `Consolidado_Final` gerado na Fase 1.
+2.  **Execução:** Rodar o notebook/script `analise_fase2.py` sequencialmente.
+3.  **Monitoramento:** Acompanhar os logs de calibração do Random Forest (RMSE).
+4.  **Resultado:** Abrir o arquivo `AUDITORIA_COMPLETA_RASTREAVEL.csv` no Excel (separador `;`, UTF-8) e ordenar pela coluna `Score_Risco`.
+
+"""
+
+# Define o caminho para salvar o arquivo na pasta atual do projeto
+nome_arquivo = "Documentacao_Tecnica_Auditoria_Fase2.md"
+caminho_completo = os.path.join(os.getcwd(), nome_arquivo)
+
+try:
+    with open(caminho_completo, "w", encoding="utf-8") as f:
+        f.write(conteudo_docs_fase2)
+    print(f"✅ Documentação da Fase 2 gerada com sucesso!")
+    print(f"📂 Arquivo: {caminho_completo}")
+    print("   (Abrange NLP, Clusterização, Random Forest e Fórmula de Risco)")
+except Exception as e:
+    print(f"❌ Erro ao gerar documentação: {e}")
