@@ -1,34 +1,7 @@
-```python
-# Read the content of Phase 1 documentation
-with open('Documentacao_Tecnica_ETL_Fase1_v2.md', 'r', encoding='utf-8') as f:
-    doc_phase1 = f.read()
-
-# Read the content of Phase 2 documentation
-with open('docs_fase_2.md', 'r', encoding='utf-8') as f:
-    doc_phase2 = f.read()
-
-print("Phase 1 Content Length:", len(doc_phase1))
-print("Phase 2 Content Length:", len(doc_phase2))
-
-
-```
-
-```text
-Phase 1 Content Length: 5614
-Phase 2 Content Length: 7269
-
-
-```
-
-Com base na documentação anexada, preparei uma versão unificada e bem estruturada para o `README.md` do seu projeto no GitHub.
-
-O documento abaixo integra o fluxo completo, desde a limpeza bruta (Fase 1) até a inteligência artificial preditiva (Fase 2), mantendo o nível técnico detalhado que você solicitou.
-
----
 
 # 📘 Manual Técnico Unificado: Pipeline de Auditoria em Compras Públicas
 
-**Projeto:** Mineração e Auditoria de Cartão de Pagamento do Governo Federal (CPGF)
+**Projeto:** Mineração e Auditoria de Cartão de Pagamento do Governo Federal
 **Tecnologia:** Python 3.x + PySpark (MLlib & SQL)
 **Versão do Pipeline:** 2.0 (Consolidado: ETL + Machine Learning Supervisionado)
 
